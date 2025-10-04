@@ -1,6 +1,6 @@
 #include "NumberPlateRecognizer.h"
 
-int main()
+int main(int argc, char **argv)
 {
     NumberPlateRecognizer recognizer;
 
@@ -23,10 +23,22 @@ int main()
     std::cout << "3. MJPEG: http://ip:port/mjpeg" << std::endl;
     std::cout << "==================================" << std::endl;
 
-    // Запрос URL у пользователя
     std::string url;
-    std::cout << "Enter camera URL: ";
-    std::getline(std::cin, url);
+    // Проверяем аргументы командной строки
+    if (argc > 1) {
+        url = argv[1]; // Первый аргумент - URL
+        std::cout << "Using URL from command line: " << url << std::endl;
+    } else {
+        // Если аргументов нет - запрашиваем у пользователя
+        std::cout << "Enter camera URL: ";
+        std::getline(std::cin, url);
+
+        if (url.empty()) {
+            // Default URL если ничего не ввели
+            url = "http://127.0.0.1:8080/video";
+            std::cout << "Using default URL: " << url << std::endl;
+        }
+    }
 
     if (url.empty()) {
         // URL для тестирования
