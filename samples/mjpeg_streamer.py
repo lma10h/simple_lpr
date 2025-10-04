@@ -8,7 +8,9 @@ class VideoHandler(BaseHTTPRequestHandler):
         if self.path == '/video':
             print(f"🎥 Client connected: {self.client_address[0]}")
             self.send_response(200)
-            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
+            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=--myboundary')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('Cache-Control', 'no-cache')
             self.end_headers()
             
             cap = cv2.VideoCapture('ru1_mjpeg_cut.mp4')
@@ -28,15 +30,13 @@ class VideoHandler(BaseHTTPRequestHandler):
                     
                     if ret:
                         try:
-                            self.wfile.write(b"--frame\r\n")
+                            self.wfile.write(b"\r\n--myboundary\r\n")
                             self.wfile.write(b"Content-Type: image/jpeg\r\n\r\n")
                             self.wfile.write(jpeg.tobytes())
                             self.wfile.write(b"\r\n")
                         except BrokenPipeError:
                             print("🔌 Client disconnected")
                             break
-                    
-                    time.sleep(frame_delay)
                     
             except Exception as e:
                 print(f"❌ Error: {e}")
