@@ -19,7 +19,9 @@ include_directories(src)
 
 # Создаем исполняемый файл
 add_executable(plate_recognition 
+    src/NumberPlateRecognizer.h
     src/main.cpp
+    src/NumberPlateRecognizer.cpp
 )
 
 # Линкуем библиотеки
