@@ -1,6 +1,9 @@
 #include <NumberPlateRecognizer.h>
 
-NumberPlateRecognizer::NumberPlateRecognizer()
+#include <QDebug>
+
+NumberPlateRecognizer::NumberPlateRecognizer(QObject *parent)
+    : QObject(parent)
 {
     std::cout << "Initializing Number Plate Recognizer..." << std::endl;
 
@@ -21,12 +24,49 @@ NumberPlateRecognizer::NumberPlateRecognizer()
         std::cerr << "Using contour-based detection only" << std::endl;
     }
 
+    // Инициализация переменных для ROI
+    roiSelectionMode = false;
+    roiSelected = false;
+    selectedROI = cv::Rect();
+
     std::cout << "Number Plate Recognizer initialized successfully!" << std::endl;
 }
 
 NumberPlateRecognizer::~NumberPlateRecognizer()
 {
+    stopProcessing();
     tess.End();
+}
+
+void NumberPlateRecognizer::startProcessing(const QString &url)
+{
+    stopFlag = false;
+    processIPCamera(url.toStdString());
+}
+
+void NumberPlateRecognizer::stopProcessing()
+{
+    stopFlag = true;
+}
+
+void NumberPlateRecognizer::enableROISelection()
+{
+    roiSelectionMode = true;
+    qDebug() << "ROI selection enabled";
+}
+
+void NumberPlateRecognizer::saveROI()
+{
+    roiSelected = true;
+    roiSelectionMode = false;
+    qDebug() << "ROI saved:" << selectedROI.width << "x" << selectedROI.height;
+    emit roiUpdated(selectedROI.x, selectedROI.y, selectedROI.width, selectedROI.height);
+}
+
+void NumberPlateRecognizer::clearROI()
+{
+    roiSelected = false;
+    qDebug() << "ROI cleared";
 }
 
 // Предобработка изображения
@@ -114,26 +154,6 @@ std::string NumberPlateRecognizer::recognizeText(const cv::Mat &plateImage)
     return result;
 }
 
-// Очистка и валидация номера
-std::string NumberPlateRecognizer::cleanNumberPlateText(const std::string &text)
-{
-    // Удаление лишних символов
-    std::string cleaned;
-    for (char c : text) {
-        if (std::isalnum(c)) {
-            cleaned += std::toupper(c);
-        }
-    }
-
-    // Простая валидация по длине
-    if (cleaned.length() >= 6 && cleaned.length() <= 9) {
-        std::cout << "Recognized: " << cleaned << std::endl;
-        return cleaned;
-    }
-
-    return "";
-}
-
 // Обработка IP-камеры
 void NumberPlateRecognizer::processIPCamera(const std::string &url)
 {
@@ -146,12 +166,16 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
     }
 
     std::cout << "Successfully connected to IP camera!" << std::endl;
-    std::cout << "Press 'q' to quit, 's' to save current frame" << std::endl;
+    std::cout << "Controls:" << std::endl;
+    std::cout << "- Press '1' to enable ROI selection mode" << std::endl;
+    std::cout << "- Press '2' to save selected ROI" << std::endl;
+    std::cout << "- Press '3' to clear ROI" << std::endl;
+    std::cout << "- Press 'q' to quit" << std::endl;
 
     cv::Mat frame;
     int frameCount = 0;
 
-    while (true) {
+    while (!stopFlag) {
         cap >> frame;
         if (frame.empty()) {
             std::cerr << "Failed to grab frame from IP camera" << std::endl;
@@ -160,41 +184,72 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
 
         frameCount++;
 
-        // Обрабатываем каждый 5-й кадр для скорости
-        if (frameCount % 3 == 0) {
-            // Поиск plate-ов с ГРЗ на изображении
-            std::vector<cv::Rect> plates = detectPlates(frame);
-            // Отладочная информация для каждого найденного региона
-            for (size_t i = 0; i < plates.size(); i++) {
-                std::cout << "Plate " << i << ": " << plates[i].x << "," << plates[i].y << " "
-                          << plates[i].width << "x" << plates[i].height << std::endl;
+        // Создаем копию для отрисовки
+        cv::Mat displayFrame = frame.clone();
+        // Получаем текущий ROI (если не выбран - используем весь кадр)
+        cv::Rect currentROI = roiSelected ? selectedROI : cv::Rect(0, 0, frame.cols, frame.rows);
+        // Рисуем интерфейс в зависимости от режима
+        if (roiSelectionMode) {
+            // Режим выбора ROI - только показываем видео и рисуем прямоугольник
+            if (drawing || (selectedROI.width > 0 && selectedROI.height > 0)) {
+                cv::rectangle(displayFrame, selectedROI, cv::Scalar(0, 255, 255), 2);
+
+                std::string rectInfo = "Selection: " + std::to_string(selectedROI.x) + ","
+                    + std::to_string(selectedROI.y) + " " + std::to_string(selectedROI.width) + "x"
+                    + std::to_string(selectedROI.height);
+                cv::putText(displayFrame, rectInfo, cv::Point(selectedROI.x, selectedROI.y - 10),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
             }
 
-            // Распознаем текст на plate
-            detectText(frame, plates);
+            // Инструкции для режима выбора ROI
+            cv::putText(displayFrame, "ROI SELECTION MODE - Draw rectangle with mouse",
+                        cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255),
+                        2);
+            cv::putText(displayFrame, "Press '2' to save, '3' to cancel", cv::Point(10, 60),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
+        } else {
+            // Обрабатываем каждый 3-й кадр для скорости
+            if (frameCount % 3 == 0) {
+                // Распознаем только в выбранной области (или во всем кадре)
+                cv::Mat processingArea = frame(currentROI);
+
+                std::vector<cv::Rect> plates = detectPlates(processingArea);
+
+                // Корректируем координаты если используется ROI
+                if (roiSelected && !plates.empty()) {
+                    for (auto &plate : plates) {
+                        plate.x += currentROI.x;
+                        plate.y += currentROI.y;
+                    }
+                }
+
+                detectText(frame, plates);
+            }
+
+            // Статусная информация
+            std::string roiStatus = roiSelected ? "ROI: " + std::to_string(currentROI.width) + "x"
+                    + std::to_string(currentROI.height)
+                                                : "FULL FRAME";
+
+            cv::putText(displayFrame, "Mode: " + roiStatus, cv::Point(10, 30),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 0), 2);
         }
 
-        // Показываем FPS
+        // Общая информация
         double fps = cap.get(cv::CAP_PROP_FPS);
-        cv::putText(frame, "FPS: " + std::to_string((int)fps), cv::Point(10, 30),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
+        cv::putText(displayFrame, "FPS: " + std::to_string((int)fps),
+                    cv::Point(10, frame.rows - 80), cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                    cv::Scalar(0, 255, 255), 1);
 
-        // Показываем источник
-        cv::putText(frame, "Source: " + url, cv::Point(10, frame.rows - 10),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
-
+        // Инструкции
+        cv::putText(displayFrame,
+                    "Press '1': Select ROI | '2': Save ROI | '3': Clear ROI | 'q': Quit",
+                    cv::Point(10, frame.rows - 10), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+                    cv::Scalar(255, 255, 0), 1);
         // Показываем результат
-        cv::imshow("Number Plate Recognition - IP Camera", frame);
+        cv::imshow("Number Plate Recognition - IP Camera", displayFrame);
 
-        // Обработка клавиш
-        int key = cv::waitKey(1);
-        if (key == 'q' || key == 27) { // 'q' или ESC
-            break;
-        } else if (key == 's') { // Сохранение кадра
-            std::string filename = "frame_" + std::to_string(frameCount) + ".jpg";
-            cv::imwrite(filename, frame);
-            std::cout << "Frame saved as: " << filename << std::endl;
-        }
+        processKeyPressed();
     }
 
     cap.release();
@@ -215,4 +270,55 @@ void NumberPlateRecognizer::processHTTP(const std::string &httpUrl)
 {
     std::cout << "Connecting to HTTP stream..." << std::endl;
     processIPCamera(httpUrl);
+}
+
+void NumberPlateRecognizer::handleMouse(int event, int x, int y, int flags)
+{
+    // Обрабатываем события мыши только в режиме выбора ROI
+    if (!roiSelectionMode)
+        return;
+
+    if (event == cv::EVENT_LBUTTONDOWN) {
+        // Начало рисования
+        drawing = true;
+        startPoint = cv::Point(x, y);
+        endPoint = startPoint;
+        selectedROI = cv::Rect();
+    } else if (event == cv::EVENT_MOUSEMOVE && drawing) {
+        // Обновление прямоугольника при движении мыши
+        endPoint = cv::Point(x, y);
+        selectedROI = cv::Rect(startPoint, endPoint);
+    } else if (event == cv::EVENT_LBUTTONUP) {
+        // Завершение рисования
+        drawing = false;
+        endPoint = cv::Point(x, y);
+
+        // Создаем правильный прямоугольник (могут быть отрицательные размеры)
+        int x1 = std::min(startPoint.x, endPoint.x);
+        int y1 = std::min(startPoint.y, endPoint.y);
+        int x2 = std::max(startPoint.x, endPoint.x);
+        int y2 = std::max(startPoint.y, endPoint.y);
+
+        selectedROI = cv::Rect(x1, y1, x2 - x1, y2 - y1);
+
+        std::cout << "Rectangle drawn: " << selectedROI.x << ", " << selectedROI.y << " "
+                  << selectedROI.width << "x" << selectedROI.height << std::endl;
+    }
+}
+
+void NumberPlateRecognizer::processKeyPressed()
+{
+    // Обработка клавиш
+    int key = cv::waitKey(1);
+    if (key == 'q' || key == 27) { // 'q' или ESC
+        return;
+    } else if (key == '1') { // Включить режим выбора ROI
+        enableROISelection();
+    } else if (key == '2') { // Сохранить ROI
+        saveROI();
+    } else if (key == '3') { // Очистить ROI
+        roiSelected = false;
+        selectedROI = cv::Rect();
+        std::cout << "ROI cleared - using full frame" << std::endl;
+    }
 }
