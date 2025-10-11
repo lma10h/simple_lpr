@@ -40,12 +40,6 @@ int main(int argc, char **argv)
         }
     }
 
-    if (url.empty()) {
-        // URL для тестирования
-        url = "http://127.0.0.1:8080/video"; // замените на ваш URL
-        std::cout << "Using default URL: " << url << std::endl;
-    }
-
     // Запуск обработки IP-камеры
     recognizer.processIPCamera(url);
 
