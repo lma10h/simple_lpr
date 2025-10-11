@@ -166,14 +166,19 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
     }
 
     std::cout << "Successfully connected to IP camera!" << std::endl;
-    std::cout << "Controls:" << std::endl;
-    std::cout << "- Press '1' to enable ROI selection mode" << std::endl;
-    std::cout << "- Press '2' to save selected ROI" << std::endl;
-    std::cout << "- Press '3' to clear ROI" << std::endl;
-    std::cout << "- Press 'q' to quit" << std::endl;
 
     cv::Mat frame;
     int frameCount = 0;
+
+    // Настройки размера окна
+    const std::string WINDOW_NAME = "Number Plate Recognition";
+    const int TARGET_WIDTH = 1280;
+    const int TARGET_HEIGHT = 720;
+
+    // Создаем resizeable окно
+    cv::namedWindow(WINDOW_NAME, cv::WINDOW_NORMAL);
+    cv::resizeWindow(WINDOW_NAME, TARGET_WIDTH, TARGET_HEIGHT);
+    cv::setMouseCallback(WINDOW_NAME, onMouse, this);
 
     while (!stopFlag) {
         cap >> frame;
@@ -247,9 +252,9 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
                     cv::Point(10, frame.rows - 10), cv::FONT_HERSHEY_SIMPLEX, 0.5,
                     cv::Scalar(255, 255, 0), 1);
         // Показываем результат
-        cv::imshow("Number Plate Recognition - IP Camera", displayFrame);
+        cv::imshow(WINDOW_NAME, displayFrame);
 
-        processKeyPressed();
+        cv::waitKey(1);
     }
 
     cap.release();
@@ -306,19 +311,8 @@ void NumberPlateRecognizer::handleMouse(int event, int x, int y, int flags)
     }
 }
 
-void NumberPlateRecognizer::processKeyPressed()
+void NumberPlateRecognizer::onMouse(int event, int x, int y, int flags, void *userdata)
 {
-    // Обработка клавиш
-    int key = cv::waitKey(1);
-    if (key == 'q' || key == 27) { // 'q' или ESC
-        return;
-    } else if (key == '1') { // Включить режим выбора ROI
-        enableROISelection();
-    } else if (key == '2') { // Сохранить ROI
-        saveROI();
-    } else if (key == '3') { // Очистить ROI
-        roiSelected = false;
-        selectedROI = cv::Rect();
-        std::cout << "ROI cleared - using full frame" << std::endl;
-    }
+    NumberPlateRecognizer *recognizer = static_cast<NumberPlateRecognizer *>(userdata);
+    recognizer->handleMouse(event, x, y, flags);
 }

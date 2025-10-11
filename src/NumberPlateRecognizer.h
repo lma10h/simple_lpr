@@ -33,7 +33,7 @@ public:
     void processHTTP(const std::string &httpUrl);
 
     void handleMouse(int event, int x, int y, int flags);
-    void processKeyPressed();
+    static void onMouse(int event, int x, int y, int flags, void *userdata);
 
 signals:
     void finished();
