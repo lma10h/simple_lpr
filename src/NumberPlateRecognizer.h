@@ -1,5 +1,4 @@
-#ifndef NUMBERPLATERECOGNIZER_H
-#define NUMBERPLATERECOGNIZER_H
+#pragma once
 
 #include <iostream>
 #include <leptonica/allheaders.h>
@@ -20,12 +19,12 @@ public:
 
     cv::Mat preprocessImage(const cv::Mat &image);
     std::vector<cv::Rect> detectPlates(const cv::Mat &image);
-    std::vector<cv::Rect> findPlatesByContours(const cv::Mat &image);
+    void detectText(const cv::Mat &image, const std::vector<cv::Rect> &plates);
     std::string recognizeText(const cv::Mat &plateImage);
     std::string cleanNumberPlateText(const std::string &text);
     void processIPCamera(const std::string &url);
     void processRTSP(const std::string &rtspUrl);
     void processHTTP(const std::string &httpUrl);
-};
 
-#endif
+private:
+};

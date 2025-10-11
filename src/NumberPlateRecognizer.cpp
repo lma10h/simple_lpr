@@ -61,72 +61,57 @@ std::vector<cv::Rect> NumberPlateRecognizer::detectPlates(const cv::Mat &image)
     cv::equalizeHist(gray, gray);
 
     // Детекция с каскадом Хаара
-    if (!plateCascade.empty()) {
-        plateCascade.detectMultiScale(gray, plates, 1.1, 3, 0, cv::Size(80, 30),
-                                      cv::Size(300, 100));
-    }
-
-    // Если каскад не нашел, используем контуры
-    if (plates.empty()) {
-        plates = findPlatesByContours(image);
+    plateCascade.detectMultiScale(gray, plates, 1.1, 10, 0);
+    if (plates.size()) {
+        std::cout << "Haar cascade found: " << plates.size() << " regions" << std::endl;
     }
 
     return plates;
 }
 
-// Альтернативный метод через контуры
-std::vector<cv::Rect> NumberPlateRecognizer::findPlatesByContours(const cv::Mat &image)
+void NumberPlateRecognizer::detectText(const cv::Mat &frame, const std::vector<cv::Rect> &plates)
 {
-    std::vector<cv::Rect> plates;
-    cv::Mat processed = preprocessImage(image);
+    for (size_t i = 0; i < plates.size(); i++) {
+        const auto &plateRect = plates[i];
+        // Вырезаем область номера
+        cv::rectangle(frame, plateRect, {255, 0, 0}, 5);
 
-    // Морфологические операции для улучшения контуров
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-    cv::morphologyEx(processed, processed, cv::MORPH_CLOSE, kernel);
+        // Распознавание
+        cv::Mat plateROI = frame(plateRect);
+        std::string plateText = recognizeText(plateROI);
 
-    // Поиск контуров
-    std::vector<std::vector<cv::Point>> contours;
-    std::vector<cv::Vec4i> hierarchy;
-    cv::findContours(processed, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
-    // Фильтрация контуров по размеру и форме
-    for (const auto &contour : contours) {
-        cv::Rect rect = cv::boundingRect(contour);
-        double aspectRatio = (double)rect.width / rect.height;
-        double area = cv::contourArea(contour);
-        double extent = area / (rect.width * rect.height);
-
-        // Типичные пропорции номерного знака
-        if (rect.width > 100 && rect.height > 30 && rect.width < 500 && rect.height < 150
-            && aspectRatio > 2.0 && aspectRatio < 5.0 && extent > 0.4) {
-            plates.push_back(rect);
+        if (!plateText.empty()) {
+            // Рисуем bounding box
+            cv::rectangle(frame, plateRect, cv::Scalar(0, 255, 0), 3);
+            // Добавляем текст
+            cv::putText(frame, plateText, cv::Point(plateRect.x, plateRect.y - 10),
+                        cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0), 2);
+            std::cout << "=== Detected plate: " << plateText << " ===" << std::endl;
         }
     }
-
-    return plates;
 }
 
 // Распознавание текста с номера
 std::string NumberPlateRecognizer::recognizeText(const cv::Mat &plateImage)
 {
     // Увеличиваем область для лучшего распознавания
-    cv::Mat enlarged;
-    cv::resize(plateImage, enlarged, cv::Size(plateImage.cols * 2, plateImage.rows * 2), 0, 0,
-               cv::INTER_CUBIC);
-
-    cv::Mat processed = preprocessImage(enlarged);
+    cv::Mat processed = preprocessImage(plateImage);
 
     // Установка изображения для Tesseract
-    tess.SetImage(processed.data, processed.cols, processed.rows, 1, processed.step);
+    tess.SetImage(processed.data, processed.cols, processed.rows, processed.elemSize(),
+                  processed.step);
 
     // Получение текста
     char *text = tess.GetUTF8Text();
     std::string result(text ? text : "");
-    if (text)
+    if (text) {
         delete[] text;
+    }
+
+    std::cout << "OCR result: '" << result << "'" << std::endl;
 
     // Очистка текста
-    return cleanNumberPlateText(result);
+    return result;
 }
 
 // Очистка и валидация номера
@@ -165,7 +150,6 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
 
     cv::Mat frame;
     int frameCount = 0;
-    std::vector<std::string> detectedPlates;
 
     while (true) {
         cap >> frame;
@@ -177,51 +161,23 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
         frameCount++;
 
         // Обрабатываем каждый 5-й кадр для скорости
-        if (frameCount % 5 == 0) {
-            // Детекция номеров
+        if (frameCount % 3 == 0) {
+            // Поиск plate-ов с ГРЗ на изображении
             std::vector<cv::Rect> plates = detectPlates(frame);
-
-            for (const auto &plateRect : plates) {
-                // Вырезаем область номера
-                cv::Mat plateROI = frame(plateRect);
-
-                // Распознаем текст
-                std::string plateText = recognizeText(plateROI);
-
-                if (!plateText.empty()) {
-                    // Проверяем дубликаты
-                    bool isDuplicate = false;
-                    for (const auto &existing : detectedPlates) {
-                        if (existing == plateText) {
-                            isDuplicate = true;
-                            break;
-                        }
-                    }
-
-                    if (!isDuplicate) {
-                        detectedPlates.push_back(plateText);
-
-                        // Рисуем bounding box
-                        cv::rectangle(frame, plateRect, cv::Scalar(0, 255, 0), 3);
-
-                        // Добавляем текст
-                        cv::putText(frame, plateText, cv::Point(plateRect.x, plateRect.y - 10),
-                                    cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0), 2);
-
-                        std::cout << "=== Detected plate: " << plateText << " ===" << std::endl;
-                    }
-                }
+            // Отладочная информация для каждого найденного региона
+            for (size_t i = 0; i < plates.size(); i++) {
+                std::cout << "Plate " << i << ": " << plates[i].x << "," << plates[i].y << " "
+                          << plates[i].width << "x" << plates[i].height << std::endl;
             }
+
+            // Распознаем текст на plate
+            detectText(frame, plates);
         }
 
         // Показываем FPS
         double fps = cap.get(cv::CAP_PROP_FPS);
         cv::putText(frame, "FPS: " + std::to_string((int)fps), cv::Point(10, 30),
                     cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
-
-        // Показываем количество обнаруженных номеров
-        cv::putText(frame, "Plates detected: " + std::to_string(detectedPlates.size()),
-                    cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
 
         // Показываем источник
         cv::putText(frame, "Source: " + url, cv::Point(10, frame.rows - 10),
@@ -246,10 +202,6 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
 
     // Вывод итогов
     std::cout << "\n=== Detection Summary ===" << std::endl;
-    std::cout << "Total plates detected: " << detectedPlates.size() << std::endl;
-    for (size_t i = 0; i < detectedPlates.size(); i++) {
-        std::cout << i + 1 << ": " << detectedPlates[i] << std::endl;
-    }
 }
 
 // Специальные методы для разных протоколов
