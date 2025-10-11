@@ -26,7 +26,7 @@ MainWindow::MainWindow(const QString &url, QWidget *parent)
     setCentralWidget(centralWidget);
 
     // Создаем распознаватель
-    recognizer = new NumberPlateRecognizer(this);
+    recognizer = new NumberPlateRecognizer();
     connect(recognizer, &NumberPlateRecognizer::finished, this, &MainWindow::onRecognizerFinished);
     connect(recognizer, &NumberPlateRecognizer::error, this, &MainWindow::onRecognizerError);
     connect(recognizer, &NumberPlateRecognizer::roiUpdated, this, &MainWindow::onROIUpdated);
