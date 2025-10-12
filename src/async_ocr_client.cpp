@@ -58,7 +58,6 @@ void AsyncOCRClient::onReplyFinished(QNetworkReply *reply)
             QJsonObject plateObj = plates[0].toObject();
             plateText = plateObj["text"].toString();
             confidence = plateObj["confidence"].toDouble();
-            qDebug() << "OCR result:" << plateText << confidence;
         }
     } else {
         qDebug() << "OCR request failed:" << reply->errorString();

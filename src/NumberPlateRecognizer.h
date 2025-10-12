@@ -24,10 +24,7 @@ public:
     void saveROI();
     void clearROI();
 
-    cv::Mat preprocessImage(const cv::Mat &image);
-    cv::Mat detectPlate(const cv::Mat &image);
-    void detectText(const cv::Mat &image);
-    std::string recognizeText(const cv::Mat &plateImage);
+    cv::Mat detectPlate(cv::Mat image);
 
     void processIPCamera(const std::string &url);
     void processRTSP(const std::string &rtspUrl);
@@ -45,6 +42,8 @@ signals:
 private:
     cv::Mat upscalePlateSimple(const cv::Mat &plate_image, int scale = 2);
     void onOCRResultReceived(const QString &plateText, double confidence);
+    std::pair<double, cv::Mat> correct_skew(const cv::Mat &image, double delta = 1.0,
+                                            int limit = 5);
 
     cv::CascadeClassifier plateCascade;
 
@@ -59,5 +58,4 @@ private:
     cv::Point endPoint;
 
     AsyncOCRClient *ocrClient;
-    bool isOCRProcessing = false;
 };

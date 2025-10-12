@@ -2,6 +2,38 @@
 
 #include <QDebug>
 
+#include <algorithm>
+#include <cmath>
+
+void nothing()
+{
+    /*cv::Mat roiPlate = detectPlate(roiArea);
+    if (!roiPlate.empty()) {
+        cv::imwrite("frames/frame_" + std::to_string(frameNum) + "_roiPlate.jpg", roiPlate);
+
+        isOCRProcessing = true;
+
+        // Коррекция перекоса
+        auto [angle, alignedPlate] = correct_skew(roiPlate, 1, 15);
+        std::cout << "Skew angle:" << angle << "\n";
+
+        // preprocessImage
+        cv::cvtColor(alignedPlate, alignedPlate, cv::COLOR_BGR2GRAY);
+                        cv::medianBlur(alignedPlate, alignedPlate, 5);
+                        // CLAHE - адаптивное выравнивание гистограммы
+                        cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
+                        clahe->setClipLimit(3.0);
+                        clahe->setTilesGridSize(cv::Size(8, 8));
+
+                        cv::Mat enhanced;
+                        clahe->apply(alignedPlate, enhanced);
+
+        cv::imwrite("frames/frame_" + std::to_string(frameNum) + "_roiPlate_Aligned.jpg",
+                    alignedPlate);
+        ocrClient->submitFrameForRecognition(alignedPlate);
+    }*/
+}
+
 NumberPlateRecognizer::NumberPlateRecognizer(QObject *parent)
     : QObject(parent)
 {
@@ -63,63 +95,18 @@ void NumberPlateRecognizer::clearROI()
     qDebug() << "ROI cleared";
 }
 
-// Предобработка изображения
-cv::Mat NumberPlateRecognizer::preprocessImage(const cv::Mat &image)
-{
-    cv::Mat image2;
-    cv::cvtColor(image, image2, cv::COLOR_RGB2GRAY);
-
-    cv::Mat image3;
-    cv::medianBlur(image2, image3, 3);
-
-    return image3;
-}
-
 // Детекция области с номером
-cv::Mat NumberPlateRecognizer::detectPlate(const cv::Mat &image)
+cv::Mat NumberPlateRecognizer::detectPlate(cv::Mat image)
 {
-    cv::Mat image2;
-    cv::cvtColor(image, image2, cv::COLOR_BGR2RGB);
-
     // Детекция с каскадом Хаара
     std::vector<cv::Rect> plates;
-    plateCascade.detectMultiScale(image2, plates, 1.1, 10, 0);
-    if (plates.size()) {
-        std::cout << "Haar cascade found: " << plates.size() << " regions" << std::endl;
-    }
 
+    plateCascade.detectMultiScale(image, plates, 1.1, 10, 0);
     if (plates.empty()) {
         return {};
     }
 
-    cv::Mat image3 = image2(plates[0]);
-    return upscalePlateSimple(image3);
-}
-
-void NumberPlateRecognizer::detectText(const cv::Mat &frame)
-{
-    // Распознавание
-    cv::Mat plateROI = frame;
-    std::string plateText = recognizeText(plateROI);
-    if (!plateText.empty()) {
-        std::cout << "=== Detected plate: " << plateText << " ===" << std::endl;
-    }
-}
-
-// Распознавание текста с номера
-std::string NumberPlateRecognizer::recognizeText(const cv::Mat &plateImage)
-{
-    // Увеличиваем область для лучшего распознавания
-    cv::Mat processed = preprocessImage(plateImage);
-    Q_UNUSED(processed);
-
-    // Получение текста
-    std::string result;
-
-    std::cout << "OCR result: '" << result << "'" << std::endl;
-
-    // Очистка текста
-    return result;
+    return upscalePlateSimple(image(plates[0]), 3);
 }
 
 // Обработка IP-камеры
@@ -147,6 +134,11 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
     cv::resizeWindow(WINDOW_NAME, TARGET_WIDTH, TARGET_HEIGHT);
     cv::setMouseCallback(WINDOW_NAME, onMouse, this);
 
+    // Таймер для ограничения частоты запросов
+    auto last_ocr_time = std::chrono::steady_clock::now();
+    const std::chrono::milliseconds ocr_interval(1000); // 1 секунда
+
+    int frameNum = 0;
     while (!stopFlag) {
         cap >> frame;
         if (frame.empty()) {
@@ -154,6 +146,7 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
             break;
         }
 
+        ++frameNum;
         // Создаем копию для отрисовки
         cv::Mat displayFrame = frame.clone();
         // Получаем текущий ROI (если не выбран - используем весь кадр)
@@ -164,24 +157,27 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
             // Режим выбора ROI - только показываем видео и рисуем прямоугольник
             if (drawing || (selectedROI.width > 0 && selectedROI.height > 0)) {
                 cv::rectangle(displayFrame, selectedROI, cv::Scalar(0, 255, 255), 2);
-
-                std::string rectInfo = "Selection: " + std::to_string(selectedROI.x) + ","
-                    + std::to_string(selectedROI.y) + " " + std::to_string(selectedROI.width) + "x"
-                    + std::to_string(selectedROI.height);
-                cv::putText(displayFrame, rectInfo, cv::Point(selectedROI.x, selectedROI.y - 10),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
             }
         } else {
             // Обычный режим - отправляем кадры на распознавание
-            if (!isOCRProcessing) {
-                isOCRProcessing = true;
+            auto current_time = std::chrono::steady_clock::now();
+            auto time_since_last_ocr = current_time - last_ocr_time;
 
-                // Берем ROI область для распознавания
+            // Проверяем, прошла ли 1 секунда с последнего запроса
+            if (time_since_last_ocr >= ocr_interval) {
+                cv::imwrite("frames/frame_" + std::to_string(frameNum) + ".jpg", frame);
+
                 cv::Mat roiArea = frame(currentROI);
-                cv::Mat roiPlate = detectPlate(roiArea);
+                if (!roiArea.empty()) {
+                    cv::imwrite("frames/frame_" + std::to_string(frameNum) + "_roiArea.jpg",
+                                roiArea);
 
-                // Отправляем на распознавание (асинхронно)
-                ocrClient->submitFrameForRecognition(roiPlate);
+                    // Коррекция перекоса
+                    auto [angle, alignedPlate] = correct_skew(roiArea, 1, 15);
+                    ocrClient->submitFrameForRecognition(alignedPlate);
+
+                    last_ocr_time = current_time;
+                }
             }
         }
 
@@ -193,7 +189,6 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
 
     cap.release();
     cv::destroyAllWindows();
-    isOCRProcessing = false;
 
     // Вывод итогов
     std::cout << "\n=== Detection Summary ===" << std::endl;
@@ -277,8 +272,6 @@ cv::Mat NumberPlateRecognizer::upscalePlateSimple(const cv::Mat &plate_image, in
 
 void NumberPlateRecognizer::onOCRResultReceived(const QString &plateText, double confidence)
 {
-    isOCRProcessing = false;
-
     if (!plateText.isEmpty()) {
         std::cout << "=== Detected plate: " << plateText.toStdString()
                   << " (confidence: " << confidence << ") ===" << std::endl;
@@ -286,4 +279,63 @@ void NumberPlateRecognizer::onOCRResultReceived(const QString &plateText, double
 
     // Можно также emit-ить сигнал для MainWindow
     emit plateDetected(plateText, confidence);
+}
+
+std::pair<double, cv::Mat> NumberPlateRecognizer::correct_skew(const cv::Mat &image, double delta,
+                                                               int limit)
+{
+    // Функция для вычисления скора
+    auto determine_score = [](const cv::Mat &arr, double angle) -> std::pair<cv::Mat, double> {
+        cv::Point2f center(arr.cols / 2.0f, arr.rows / 2.0f);
+        cv::Mat rotation_matrix = cv::getRotationMatrix2D(center, angle, 1.0);
+
+        cv::Mat data;
+        cv::warpAffine(arr, data, rotation_matrix, arr.size(), cv::INTER_NEAREST,
+                       cv::BORDER_CONSTANT, cv::Scalar(0));
+
+        // Вычисляем гистограмму (сумма по строкам)
+        cv::Mat histogram;
+        cv::reduce(data, histogram, 1, cv::REDUCE_SUM, CV_64F);
+
+        // Вычисляем score
+        double score = 0.0;
+        for (int i = 1; i < histogram.rows; i++) {
+            double diff = histogram.at<double>(i) - histogram.at<double>(i - 1);
+            score += diff * diff;
+        }
+
+        return std::make_pair(histogram, score);
+    };
+
+    // Конвертируем в grayscale и бинаризуем
+#if 0
+    cv::Mat gray;
+    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    cv::Mat thresh;
+    cv::threshold(gray, thresh, 0, 255, cv::THRESH_BINARY_INV | cv::THRESH_OTSU);
+#endif
+
+    // Перебираем углы и вычисляем скоре
+    std::vector<double> scores;
+    std::vector<double> angles;
+
+    for (double angle = -limit; angle <= limit + delta; angle += delta) {
+        auto [histogram, score] = determine_score(image, angle);
+        scores.push_back(score);
+        angles.push_back(angle);
+    }
+
+    // Находим угол с максимальным скором
+    auto max_iter = std::max_element(scores.begin(), scores.end());
+    int best_index = std::distance(scores.begin(), max_iter);
+    double best_angle = angles[best_index];
+
+    // Применяем поворот к оригинальному изображению
+    cv::Point2f center(image.cols / 2.0f, image.rows / 2.0f);
+    cv::Mat M = cv::getRotationMatrix2D(center, best_angle, 1.0);
+
+    cv::Mat corrected;
+    cv::warpAffine(image, corrected, M, image.size(), cv::INTER_CUBIC, cv::BORDER_REPLICATE);
+
+    return std::make_pair(best_angle, corrected);
 }
