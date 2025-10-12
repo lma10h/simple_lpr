@@ -20,7 +20,7 @@ app = Flask(__name__)
 
 # Глобальная инициализация EasyOCR (один раз при запуске)
 logger.info("Initializing EasyOCR...")
-reader = easyocr.Reader(['ru', 'en'])  # русский и английский
+reader = easyocr.Reader(['ru'])  # русский
 logger.info("EasyOCR initialized successfully!")
 
 # Счетчик запросов для мониторинга
@@ -37,12 +37,8 @@ def process_image(image_data):
         if img is None:
             return {"error": "Failed to decode image"}
         
-        # Конвертируем в grayscale и добавляем blur (как в вашем коде)
-        carplate_extract_img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        carplate_extract_img_gray_blur = cv2.medianBlur(carplate_extract_img_gray, 3)
-        
         # Распознаем текст
-        results = reader.readtext(carplate_extract_img_gray_blur, detail=1)
+        results = reader.readtext(img, detail=1)
         
         # Форматируем результаты
         plates = []
