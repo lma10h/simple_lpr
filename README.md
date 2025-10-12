@@ -1,6 +1,6 @@
 Ubuntu/Debian:
 sudo apt-get install libopencv-dev 
-#tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus libtesseract-dev libleptonica-dev
+python3-dev python3-pip
 easyocr
 
 Windows (vcpkg):
