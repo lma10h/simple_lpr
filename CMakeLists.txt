@@ -6,20 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Поиск пакетов
 find_package(OpenCV REQUIRED)
-find_package(PkgConfig REQUIRED)
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Concurrent)
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt5 REQUIRED COMPONENTS Core Widgets Concurrent Network)
 
-pkg_check_modules(TESSERACT REQUIRED tesseract)
-pkg_check_modules(LEPTONICA REQUIRED lept)
-
-# Включаем директории
-include_directories(${OpenCV_INCLUDE_DIRS})
-include_directories(${TESSERACT_INCLUDE_DIRS})
-include_directories(${LEPTONICA_INCLUDE_DIRS})
-include_directories(src)
-
-qt6_standard_project_setup()
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
 
 # Создаем исполняемый файл
 add_executable(NumberPlateRecognition
@@ -31,12 +22,16 @@ add_executable(NumberPlateRecognition
 
 # Линкуем библиотеки
 target_link_libraries(NumberPlateRecognition
-    Qt6::Core
-    Qt6::Widgets
-    Qt6::Concurrent
     ${OpenCV_LIBS}
-    ${TESSERACT_LIBRARIES}
-    ${LEPTONICA_LIBRARIES}
+    Qt5::Core
+    Qt5::Widgets
+    Qt5::Concurrent
+    Qt5::Network
+)
+
+target_include_directories(NumberPlateRecognition
+    PRIVATE ${OpenCV_INCLUDE_DIRS}
+    PRIVATE src
 )
 
 # Копируем data файлы
