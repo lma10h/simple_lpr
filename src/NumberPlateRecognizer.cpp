@@ -7,16 +7,6 @@ NumberPlateRecognizer::NumberPlateRecognizer(QObject *parent)
 {
     std::cout << "Initializing Number Plate Recognizer..." << std::endl;
 
-    // Инициализация Tesseract
-    if (tess.Init(NULL, "rus+eng", tesseract::OEM_LSTM_ONLY)) {
-        std::cerr << "Could not initialize tesseract!" << std::endl;
-        exit(1);
-    }
-
-    // Настройка Tesseract
-    tess.SetPageSegMode(tesseract::PSM_SINGLE_LINE);
-    tess.SetVariable("tessedit_char_whitelist", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
-
     // Загрузка каскада для детекции номеров
     std::string cascadePath = "data/haarcascade_russian_plate_number.xml";
     if (!plateCascade.load(cascadePath)) {
@@ -29,13 +19,17 @@ NumberPlateRecognizer::NumberPlateRecognizer(QObject *parent)
     roiSelected = false;
     selectedROI = cv::Rect();
 
+    // Инициализация OCR клиента
+    ocrClient = new AsyncOCRClient(this);
+    connect(ocrClient, &AsyncOCRClient::plateRecognized, this,
+            &NumberPlateRecognizer::onOCRResultReceived);
+
     std::cout << "Number Plate Recognizer initialized successfully!" << std::endl;
 }
 
 NumberPlateRecognizer::~NumberPlateRecognizer()
 {
     stopProcessing();
-    tess.End();
 }
 
 void NumberPlateRecognizer::startProcessing(const QString &url)
@@ -72,62 +66,43 @@ void NumberPlateRecognizer::clearROI()
 // Предобработка изображения
 cv::Mat NumberPlateRecognizer::preprocessImage(const cv::Mat &image)
 {
-    cv::Mat gray, blurred, thresholded;
+    cv::Mat image2;
+    cv::cvtColor(image, image2, cv::COLOR_RGB2GRAY);
 
-    // Конвертация в grayscale
-    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    cv::Mat image3;
+    cv::medianBlur(image2, image3, 3);
 
-    // Увеличение резкости
-    cv::Mat kernel = (cv::Mat_<float>(3, 3) << -1, -1, -1, -1, 9, -1, -1, -1, -1);
-    cv::filter2D(gray, gray, -1, kernel);
-
-    // Билатеральная фильтрация для сохранения границ
-    cv::bilateralFilter(gray, blurred, 11, 17, 17);
-
-    // Адаптивная thresholding
-    cv::adaptiveThreshold(blurred, thresholded, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                          cv::THRESH_BINARY, 11, 2);
-
-    return thresholded;
+    return image3;
 }
 
 // Детекция области с номером
-std::vector<cv::Rect> NumberPlateRecognizer::detectPlates(const cv::Mat &image)
+cv::Mat NumberPlateRecognizer::detectPlate(const cv::Mat &image)
 {
-    std::vector<cv::Rect> plates;
-    cv::Mat gray;
-
-    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-    cv::equalizeHist(gray, gray);
+    cv::Mat image2;
+    cv::cvtColor(image, image2, cv::COLOR_BGR2RGB);
 
     // Детекция с каскадом Хаара
-    plateCascade.detectMultiScale(gray, plates, 1.1, 10, 0);
+    std::vector<cv::Rect> plates;
+    plateCascade.detectMultiScale(image2, plates, 1.1, 10, 0);
     if (plates.size()) {
         std::cout << "Haar cascade found: " << plates.size() << " regions" << std::endl;
     }
 
-    return plates;
+    if (plates.empty()) {
+        return {};
+    }
+
+    cv::Mat image3 = image2(plates[0]);
+    return upscalePlateSimple(image3);
 }
 
-void NumberPlateRecognizer::detectText(const cv::Mat &frame, const std::vector<cv::Rect> &plates)
+void NumberPlateRecognizer::detectText(const cv::Mat &frame)
 {
-    for (size_t i = 0; i < plates.size(); i++) {
-        const auto &plateRect = plates[i];
-        // Вырезаем область номера
-        cv::rectangle(frame, plateRect, {255, 0, 0}, 5);
-
-        // Распознавание
-        cv::Mat plateROI = frame(plateRect);
-        std::string plateText = recognizeText(plateROI);
-
-        if (!plateText.empty()) {
-            // Рисуем bounding box
-            cv::rectangle(frame, plateRect, cv::Scalar(0, 255, 0), 3);
-            // Добавляем текст
-            cv::putText(frame, plateText, cv::Point(plateRect.x, plateRect.y - 10),
-                        cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0), 2);
-            std::cout << "=== Detected plate: " << plateText << " ===" << std::endl;
-        }
+    // Распознавание
+    cv::Mat plateROI = frame;
+    std::string plateText = recognizeText(plateROI);
+    if (!plateText.empty()) {
+        std::cout << "=== Detected plate: " << plateText << " ===" << std::endl;
     }
 }
 
@@ -136,17 +111,10 @@ std::string NumberPlateRecognizer::recognizeText(const cv::Mat &plateImage)
 {
     // Увеличиваем область для лучшего распознавания
     cv::Mat processed = preprocessImage(plateImage);
-
-    // Установка изображения для Tesseract
-    tess.SetImage(processed.data, processed.cols, processed.rows, processed.elemSize(),
-                  processed.step);
+    Q_UNUSED(processed);
 
     // Получение текста
-    char *text = tess.GetUTF8Text();
-    std::string result(text ? text : "");
-    if (text) {
-        delete[] text;
-    }
+    std::string result;
 
     std::cout << "OCR result: '" << result << "'" << std::endl;
 
@@ -168,7 +136,6 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
     std::cout << "Successfully connected to IP camera!" << std::endl;
 
     cv::Mat frame;
-    int frameCount = 0;
 
     // Настройки размера окна
     const std::string WINDOW_NAME = "Number Plate Recognition";
@@ -187,12 +154,11 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
             break;
         }
 
-        frameCount++;
-
         // Создаем копию для отрисовки
         cv::Mat displayFrame = frame.clone();
         // Получаем текущий ROI (если не выбран - используем весь кадр)
         cv::Rect currentROI = roiSelected ? selectedROI : cv::Rect(0, 0, frame.cols, frame.rows);
+
         // Рисуем интерфейс в зависимости от режима
         if (roiSelectionMode) {
             // Режим выбора ROI - только показываем видео и рисуем прямоугольник
@@ -205,52 +171,20 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
                 cv::putText(displayFrame, rectInfo, cv::Point(selectedROI.x, selectedROI.y - 10),
                             cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
             }
-
-            // Инструкции для режима выбора ROI
-            cv::putText(displayFrame, "ROI SELECTION MODE - Draw rectangle with mouse",
-                        cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255),
-                        2);
-            cv::putText(displayFrame, "Press '2' to save, '3' to cancel", cv::Point(10, 60),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
         } else {
-            // Обрабатываем каждый 3-й кадр для скорости
-            if (frameCount % 3 == 0) {
-                // Распознаем только в выбранной области (или во всем кадре)
-                cv::Mat processingArea = frame(currentROI);
+            // Обычный режим - отправляем кадры на распознавание
+            if (!isOCRProcessing) {
+                isOCRProcessing = true;
 
-                std::vector<cv::Rect> plates = detectPlates(processingArea);
+                // Берем ROI область для распознавания
+                cv::Mat roiArea = frame(currentROI);
+                cv::Mat roiPlate = detectPlate(roiArea);
 
-                // Корректируем координаты если используется ROI
-                if (roiSelected && !plates.empty()) {
-                    for (auto &plate : plates) {
-                        plate.x += currentROI.x;
-                        plate.y += currentROI.y;
-                    }
-                }
-
-                detectText(frame, plates);
+                // Отправляем на распознавание (асинхронно)
+                ocrClient->submitFrameForRecognition(roiPlate);
             }
-
-            // Статусная информация
-            std::string roiStatus = roiSelected ? "ROI: " + std::to_string(currentROI.width) + "x"
-                    + std::to_string(currentROI.height)
-                                                : "FULL FRAME";
-
-            cv::putText(displayFrame, "Mode: " + roiStatus, cv::Point(10, 30),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 0), 2);
         }
 
-        // Общая информация
-        double fps = cap.get(cv::CAP_PROP_FPS);
-        cv::putText(displayFrame, "FPS: " + std::to_string((int)fps),
-                    cv::Point(10, frame.rows - 80), cv::FONT_HERSHEY_SIMPLEX, 0.6,
-                    cv::Scalar(0, 255, 255), 1);
-
-        // Инструкции
-        cv::putText(displayFrame,
-                    "Press '1': Select ROI | '2': Save ROI | '3': Clear ROI | 'q': Quit",
-                    cv::Point(10, frame.rows - 10), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                    cv::Scalar(255, 255, 0), 1);
         // Показываем результат
         cv::imshow(WINDOW_NAME, displayFrame);
 
@@ -259,6 +193,7 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
 
     cap.release();
     cv::destroyAllWindows();
+    isOCRProcessing = false;
 
     // Вывод итогов
     std::cout << "\n=== Detection Summary ===" << std::endl;
@@ -315,4 +250,40 @@ void NumberPlateRecognizer::onMouse(int event, int x, int y, int flags, void *us
 {
     NumberPlateRecognizer *recognizer = static_cast<NumberPlateRecognizer *>(userdata);
     recognizer->handleMouse(event, x, y, flags);
+}
+
+cv::Mat NumberPlateRecognizer::upscalePlateSimple(const cv::Mat &plate_image, int scale)
+{
+    // Проверка на пустое изображение
+    if (plate_image.empty()) {
+        return cv::Mat();
+    }
+
+    int height = plate_image.rows;
+    int width = plate_image.cols;
+    int new_width = width * scale;
+    int new_height = height * scale;
+
+    cv::Mat upscaled;
+    cv::resize(plate_image, upscaled, cv::Size(new_width, new_height), 0, 0, cv::INTER_CUBIC);
+
+    cv::Mat kernel = (cv::Mat_<float>(3, 3) << -1, -1, -1, -1, 9, -1, -1, -1, -1);
+
+    cv::Mat sharpened;
+    cv::filter2D(upscaled, sharpened, -1, kernel);
+
+    return sharpened;
+}
+
+void NumberPlateRecognizer::onOCRResultReceived(const QString &plateText, double confidence)
+{
+    isOCRProcessing = false;
+
+    if (!plateText.isEmpty()) {
+        std::cout << "=== Detected plate: " << plateText.toStdString()
+                  << " (confidence: " << confidence << ") ===" << std::endl;
+    }
+
+    // Можно также emit-ить сигнал для MainWindow
+    emit plateDetected(plateText, confidence);
 }

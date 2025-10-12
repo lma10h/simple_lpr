@@ -1,6 +1,6 @@
-#include "NumberPlateRecognizer.h"
 #include "main_window.h"
 #include <QApplication>
+#include <iostream>
 
 int main(int argc, char *argv[])
 {
@@ -38,17 +38,3 @@ int main(int argc, char *argv[])
 
     return app.exec();
 }
-
-#if 0
-int main(int argc, char **argv)
-{
-    NumberPlateRecognizer recognizer;
-
-
-
-    // Запуск обработки IP-камеры
-    recognizer.processIPCamera(url);
-
-    return 0;
-}
-#endif

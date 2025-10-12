@@ -1,13 +1,14 @@
 #pragma once
 
-#include <iostream>
-#include <leptonica/allheaders.h>
 #include <opencv2/opencv.hpp>
-#include <regex>
-#include <tesseract/baseapi.h>
-#include <vector>
 
 #include <QThread>
+
+#include <iostream>
+#include <regex>
+#include <vector>
+
+#include "async_ocr_client.h"
 
 class NumberPlateRecognizer : public QObject
 {
@@ -24,8 +25,8 @@ public:
     void clearROI();
 
     cv::Mat preprocessImage(const cv::Mat &image);
-    std::vector<cv::Rect> detectPlates(const cv::Mat &image);
-    void detectText(const cv::Mat &image, const std::vector<cv::Rect> &plates);
+    cv::Mat detectPlate(const cv::Mat &image);
+    void detectText(const cv::Mat &image);
     std::string recognizeText(const cv::Mat &plateImage);
 
     void processIPCamera(const std::string &url);
@@ -39,9 +40,12 @@ signals:
     void finished();
     void error(const QString &error);
     void roiUpdated(int x, int y, int width, int height);
+    void plateDetected(const QString &plate, double confidence);
 
 private:
-    tesseract::TessBaseAPI tess;
+    cv::Mat upscalePlateSimple(const cv::Mat &plate_image, int scale = 2);
+    void onOCRResultReceived(const QString &plateText, double confidence);
+
     cv::CascadeClassifier plateCascade;
 
     std::atomic<bool> stopFlag{false};
@@ -53,4 +57,7 @@ private:
     bool drawing = false;
     cv::Point startPoint;
     cv::Point endPoint;
+
+    AsyncOCRClient *ocrClient;
+    bool isOCRProcessing = false;
 };
