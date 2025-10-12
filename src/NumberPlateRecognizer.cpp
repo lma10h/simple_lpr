@@ -8,7 +8,7 @@ NumberPlateRecognizer::NumberPlateRecognizer(QObject *parent)
     std::cout << "Initializing Number Plate Recognizer..." << std::endl;
 
     // Загрузка каскада для детекции номеров
-    std::string cascadePath = "data/haarcascade_russian_plate_number.xml";
+    std::string cascadePath = "haarcascade_russian_plate_number.xml";
     if (!plateCascade.load(cascadePath)) {
         std::cerr << "Could not load plate cascade from: " << cascadePath << std::endl;
         std::cerr << "Using contour-based detection only" << std::endl;
