@@ -36,5 +36,5 @@ target_include_directories(NumberPlateRecognition
     PRIVATE src
 )
 
-# Копируем data файлы
-file(COPY data DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+# Копируем файлы
+file(COPY haarcascade_russian_plate_number.xml DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
