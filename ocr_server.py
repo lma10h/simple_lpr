@@ -37,8 +37,12 @@ def process_image(image_data):
         if img is None:
             return {"error": "Failed to decode image"}
         
+        # Grayscale + Masking
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        allowlist_chars = '0123456789АВЕКМНОРСТУХ'
         # Распознаем текст
-        results = reader.readtext(img, detail=1)
+        results = reader.readtext(img, allowlist=allowlist_chars)
         
         # Форматируем результаты
         plates = []
