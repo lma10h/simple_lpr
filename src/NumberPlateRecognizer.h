@@ -40,10 +40,10 @@ signals:
     void plateDetected(const QString &plate, double confidence);
 
 private:
-    cv::Mat upscalePlateSimple(const cv::Mat &plate_image, int scale = 2);
     void onOCRResultReceived(const QString &plateText, double confidence);
     std::pair<double, cv::Mat> correct_skew(const cv::Mat &image, double delta = 1.0,
                                             int limit = 5);
+    cv::Mat enlarge_img(const cv::Mat &image, int scale_percent);
 
     cv::CascadeClassifier plateCascade;
 

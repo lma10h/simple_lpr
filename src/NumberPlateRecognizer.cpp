@@ -106,7 +106,7 @@ cv::Mat NumberPlateRecognizer::detectPlate(cv::Mat image)
         return {};
     }
 
-    return upscalePlateSimple(image(plates[0]), 3);
+    return image(plates[0]);
 }
 
 // Обработка IP-камеры
@@ -136,7 +136,7 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
 
     // Таймер для ограничения частоты запросов
     auto last_ocr_time = std::chrono::steady_clock::now();
-    const std::chrono::milliseconds ocr_interval(1000); // 1 секунда
+    const std::chrono::milliseconds ocr_interval(300); // 1 секунда
 
     int frameNum = 0;
     while (!stopFlag) {
@@ -165,18 +165,30 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
 
             // Проверяем, прошла ли 1 секунда с последнего запроса
             if (time_since_last_ocr >= ocr_interval) {
+#ifdef DUMP_TO_FILE
                 cv::imwrite("frames/frame_" + std::to_string(frameNum) + ".jpg", frame);
+#endif
 
                 cv::Mat roiArea = frame(currentROI);
+#ifdef DUMP_TO_FILE
+                cv::imwrite("frames/frame_" + std::to_string(frameNum) + "_roiArea.jpg", roiArea);
+#endif
+                roiArea = enlarge_img(roiArea, 150);
                 if (!roiArea.empty()) {
-                    cv::imwrite("frames/frame_" + std::to_string(frameNum) + "_roiArea.jpg",
+#ifdef DUMP_TO_FILE
+                    cv::imwrite("frames/frame_" + std::to_string(frameNum)
+                                    + "_roiArea_enlarged.jpg",
                                 roiArea);
+#endif
 
-                    // Коррекция перекоса
-                    auto [angle, alignedPlate] = correct_skew(roiArea, 1, 15);
-                    ocrClient->submitFrameForRecognition(alignedPlate);
+                    cv::Mat roiPlate = detectPlate(roiArea);
+                    if (!roiPlate.empty()) {
+                        // Коррекция перекоса
+                        auto [angle, alignedPlate] = correct_skew(roiPlate, 1, 15);
+                        ocrClient->submitFrameForRecognition(alignedPlate);
 
-                    last_ocr_time = current_time;
+                        last_ocr_time = current_time;
+                    }
                 }
             }
         }
@@ -247,29 +259,6 @@ void NumberPlateRecognizer::onMouse(int event, int x, int y, int flags, void *us
     recognizer->handleMouse(event, x, y, flags);
 }
 
-cv::Mat NumberPlateRecognizer::upscalePlateSimple(const cv::Mat &plate_image, int scale)
-{
-    // Проверка на пустое изображение
-    if (plate_image.empty()) {
-        return cv::Mat();
-    }
-
-    int height = plate_image.rows;
-    int width = plate_image.cols;
-    int new_width = width * scale;
-    int new_height = height * scale;
-
-    cv::Mat upscaled;
-    cv::resize(plate_image, upscaled, cv::Size(new_width, new_height), 0, 0, cv::INTER_CUBIC);
-
-    cv::Mat kernel = (cv::Mat_<float>(3, 3) << -1, -1, -1, -1, 9, -1, -1, -1, -1);
-
-    cv::Mat sharpened;
-    cv::filter2D(upscaled, sharpened, -1, kernel);
-
-    return sharpened;
-}
-
 void NumberPlateRecognizer::onOCRResultReceived(const QString &plateText, double confidence)
 {
     if (!plateText.isEmpty()) {
@@ -338,4 +327,20 @@ std::pair<double, cv::Mat> NumberPlateRecognizer::correct_skew(const cv::Mat &im
     cv::warpAffine(image, corrected, M, image.size(), cv::INTER_CUBIC, cv::BORDER_REPLICATE);
 
     return std::make_pair(best_angle, corrected);
+}
+
+cv::Mat NumberPlateRecognizer::enlarge_img(const cv::Mat &image, int scale_percent)
+{
+    if (image.empty()) {
+        return cv::Mat();
+    }
+
+    int width = int(image.cols * scale_percent / 100.0);
+    int height = int(image.rows * scale_percent / 100.0);
+    cv::Size dim(width, height);
+
+    cv::Mat resized_image;
+    cv::resize(image, resized_image, dim, 0, 0, cv::INTER_AREA);
+
+    return resized_image;
 }
