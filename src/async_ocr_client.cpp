@@ -22,20 +22,13 @@ void AsyncOCRClient::submitFrameForRecognition(const cv::Mat &frame)
     try {
         // Конвертируем cv::Mat в JPEG
         std::vector<uchar> buffer;
-        cv::imencode(".jpg", frame, buffer, {cv::IMWRITE_JPEG_QUALITY, 80});
+        cv::imencode(".jpg", frame, buffer, {cv::IMWRITE_JPEG_QUALITY, 70});
 
-        QByteArray byteArray(reinterpret_cast<const char *>(buffer.data()), buffer.size());
-        QByteArray base64Data = byteArray.toBase64();
-
-        // Дальше без изменений
-        QJsonObject requestData;
-        requestData["image"] = QString(base64Data);
+        QByteArray imageData(reinterpret_cast<const char *>(buffer.data()), buffer.size());
 
         QNetworkRequest request(serviceUrl);
-        request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-        QJsonDocument doc(requestData);
-        manager->post(request, doc.toJson());
+        request.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
+        manager->post(request, imageData);
     } catch (const cv::Exception &e) {
         qDebug() << "OpenCV exception:" << e.what();
         emit plateRecognized("", 0.0);

@@ -5,34 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-void nothing()
-{
-    /*cv::Mat roiPlate = detectPlate(roiArea);
-    if (!roiPlate.empty()) {
-        cv::imwrite("frames/frame_" + std::to_string(frameNum) + "_roiPlate.jpg", roiPlate);
-
-        isOCRProcessing = true;
-
-        // Коррекция перекоса
-        auto [angle, alignedPlate] = correct_skew(roiPlate, 1, 15);
-        std::cout << "Skew angle:" << angle << "\n";
-
-        // preprocessImage
-        cv::cvtColor(alignedPlate, alignedPlate, cv::COLOR_BGR2GRAY);
-                        cv::medianBlur(alignedPlate, alignedPlate, 5);
-                        // CLAHE - адаптивное выравнивание гистограммы
-                        cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
-                        clahe->setClipLimit(3.0);
-                        clahe->setTilesGridSize(cv::Size(8, 8));
-
-                        cv::Mat enhanced;
-                        clahe->apply(alignedPlate, enhanced);
-
-        cv::imwrite("frames/frame_" + std::to_string(frameNum) + "_roiPlate_Aligned.jpg",
-                    alignedPlate);
-        ocrClient->submitFrameForRecognition(alignedPlate);
-    }*/
-}
+#define DUMP_TO_FILE
 
 NumberPlateRecognizer::NumberPlateRecognizer(QObject *parent)
     : QObject(parent)
@@ -95,10 +68,9 @@ void NumberPlateRecognizer::clearROI()
     qDebug() << "ROI cleared";
 }
 
-// Детекция области с номером
+// Детекция области с номером с каскадом Хаара
 cv::Mat NumberPlateRecognizer::detectPlate(cv::Mat image)
 {
-    // Детекция с каскадом Хаара
     std::vector<cv::Rect> plates;
 
     plateCascade.detectMultiScale(image, plates, 1.1, 10, 0);
@@ -163,32 +135,11 @@ void NumberPlateRecognizer::processIPCamera(const std::string &url)
             auto current_time = std::chrono::steady_clock::now();
             auto time_since_last_ocr = current_time - last_ocr_time;
 
-            // Проверяем, прошла ли 1 секунда с последнего запроса
             if (time_since_last_ocr >= ocr_interval) {
-#ifdef DUMP_TO_FILE
-                cv::imwrite("frames/frame_" + std::to_string(frameNum) + ".jpg", frame);
-#endif
-
                 cv::Mat roiArea = frame(currentROI);
-#ifdef DUMP_TO_FILE
-                cv::imwrite("frames/frame_" + std::to_string(frameNum) + "_roiArea.jpg", roiArea);
-#endif
-                roiArea = enlarge_img(roiArea, 150);
                 if (!roiArea.empty()) {
-#ifdef DUMP_TO_FILE
-                    cv::imwrite("frames/frame_" + std::to_string(frameNum)
-                                    + "_roiArea_enlarged.jpg",
-                                roiArea);
-#endif
-
-                    cv::Mat roiPlate = detectPlate(roiArea);
-                    if (!roiPlate.empty()) {
-                        // Коррекция перекоса
-                        auto [angle, alignedPlate] = correct_skew(roiPlate, 1, 15);
-                        ocrClient->submitFrameForRecognition(alignedPlate);
-
-                        last_ocr_time = current_time;
-                    }
+                    ocrClient->submitFrameForRecognition(roiArea);
+                    last_ocr_time = current_time;
                 }
             }
         }
@@ -270,6 +221,7 @@ void NumberPlateRecognizer::onOCRResultReceived(const QString &plateText, double
     emit plateDetected(plateText, confidence);
 }
 
+// Коррекция перекоса
 std::pair<double, cv::Mat> NumberPlateRecognizer::correct_skew(const cv::Mat &image, double delta,
                                                                int limit)
 {
