@@ -40,7 +40,7 @@ logger.info("initialized successfully!")
 request_counter = 0
 counter_lock = threading.Lock()
 
-def process_image(image_data):
+def process_image(image_data, current_request):
     """Обрабатывает изображение и возвращает распознанный текст"""
     try:
         nparr = np.frombuffer(image_data, np.uint8)
@@ -50,7 +50,7 @@ def process_image(image_data):
             return {"error": "Failed to decode image"}
         
         # Распознаем текст
-        detections = detector.detect(img)
+        detections = detector.track(img) # для нескольких кадров
         results = pipeline.process_frame(img, detections)
         print("result:", results);
         
@@ -65,7 +65,7 @@ def process_image(image_data):
             })
             
             # Логируем каждый распознанный текст
-            logger.info(f"Recognized: '{text}' (confidence: {confidence:.3f})")
+            logger.info(f"[Request #{current_request}]: '{text}' (confidence: {confidence:.3f})")
         
         return {'plates': plates}
         
@@ -83,22 +83,22 @@ def recognize_plate():
         current_request = request_counter
     
     start_time = time.time()
-    logger.info(f"[Request #{current_request}] Processing started")
+    logger.info(f"[Request #{current_request}]: Processing started")
     
     try:
         t1 = time.time()
         image_data = request.get_data()
         if len(image_data) == 0:
-            logger.warning(f"[Request #{current_request}] Empty request")
+            logger.warning(f"[Request #{current_request}]: Empty request")
             return jsonify({'error': 'No image data provided'}), 400
 
         t2 = time.time()
-        logger.info(f"[Request #{current_request}] Receive: {(t2-t1):.3f}s")
+        logger.info(f"[Request #{current_request}]: Receive: {(t2-t1):.3f}s")
 
         # Обрабатываем изображение
-        result = process_image(image_data)
+        result = process_image(image_data, request_counter)
         t3 = time.time()
-        logger.info(f"[Request #{current_request}] Process: {(t3-t2):.3f}s")
+        logger.info(f"[Request #{current_request}]: Process: {(t3-t2):.3f}s")
                 
         if 'error' in result:
             return jsonify(result), 500
@@ -107,7 +107,7 @@ def recognize_plate():
             
     except Exception as e:
         processing_time = (datetime.now() - start_time).total_seconds()
-        logger.error(f"[Request #{current_request}] Error after {processing_time:.3f}s: {str(e)}")
+        logger.error(f"[Request #{current_request}]: Error after {processing_time:.3f}s: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/health', methods=['GET'])
