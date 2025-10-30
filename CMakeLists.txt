@@ -19,7 +19,6 @@ add_executable(NumberPlateRecognition
     src/NumberPlateRecognizer.cpp
     src/main_window.h src/main_window.cpp
     src/async_ocr_client.h src/async_ocr_client.cpp
-
 )
 
 # Линкуем библиотеки

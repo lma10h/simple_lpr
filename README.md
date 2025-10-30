@@ -5,3 +5,9 @@ python3 mjpeg_streamer.py
 python3 ../ocr_server.py
 ## запускаем фронт LPR
 ./plate_recognition http://127.0.0.1:8080/video
+
+## TODO:
+```
+1. обучить на квадратных номерах
+2. чем track() от detect() отличается внутри
+```
